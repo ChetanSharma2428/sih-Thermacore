@@ -112,40 +112,51 @@
     }
     @keyframes pulseDot { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.85); } }
 
-    /* OPTIONAL HOST CONFIG BAR (Only shown when running outside ESP32, e.g. on localhost) */
+    /* HOST CONNECTION DOCK */
     .ip-config-bar {
-      display: none;
+      display: flex;
       background: var(--glass-bg);
-      backdrop-filter: blur(20px);
+      backdrop-filter: blur(25px) saturate(180%);
+      -webkit-backdrop-filter: blur(25px) saturate(180%);
       border: 1px solid var(--glass-border);
-      border-radius: 14px;
-      padding: 10px 18px;
-      margin-bottom: 18px;
+      border-radius: 16px;
+      padding: 12px 20px;
+      margin-bottom: 20px;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      font-size: 12px;
-      box-shadow: var(--glass-shadow);
+      flex-wrap: wrap;
+      gap: 14px;
+      box-shadow: var(--glass-shadow), var(--glass-bevel);
     }
-    .ip-input-group { display: flex; align-items: center; gap: 8px; flex: 1; max-width: 460px; }
+    .ip-input-group { display: flex; align-items: center; gap: 8px; flex: 1; max-width: 420px; }
     .ip-input {
       flex: 1;
-      padding: 8px 14px;
-      border-radius: 8px;
+      padding: 9px 14px;
+      border-radius: 10px;
       border: 1px solid #cbd5e1;
       font-family: var(--font-mono);
-      font-size: 12px;
-      background: #fff;
+      font-size: 13px;
+      background: rgba(255, 255, 255, 0.9);
+      color: var(--text-main);
+      box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.04);
     }
+    .ip-input:focus { outline: none; border-color: #0284c7; box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15); }
     .ip-btn {
-      padding: 8px 16px;
-      background: #0284c7;
+      padding: 9px 18px;
+      background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
       color: white;
       border: none;
-      border-radius: 8px;
-      font-weight: 700;
+      border-radius: 10px;
+      font-weight: 800;
+      font-size: 11px;
+      letter-spacing: 0.5px;
       cursor: pointer;
+      box-shadow: 0 4px 12px rgba(2, 132, 199, 0.25);
+      transition: all 0.2s;
     }
+    .ip-btn:hover { background: #0284c7; transform: translateY(-1px); }
+    .ip-btn:active { transform: translateY(1px); }
+
 
     /* STATUS BANNER (GREEN STABLE / RED ALERT) */
     .status-banner {
@@ -530,14 +541,26 @@
       </div>
     </header>
 
-    <!-- IP CONFIG BAR (Automatically shown if accessed from localhost or file://) -->
+    <!-- HARDWARE IP CONNECTION DOCK (Deployable across web/localhost) -->
     <div class="ip-config-bar" id="ipBar">
-      <span>📡 ESP32 IP Address:</span>
-      <div class="ip-input-group">
-        <input type="text" class="ip-input" id="espIpInput" placeholder="e.g. 192.168.1.50">
-        <button class="ip-btn" onclick="saveEspIp()">Connect</button>
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <span style="font-weight:800; font-size:12px; color:var(--text-sub); text-transform:uppercase; letter-spacing:0.5px;">📡 ESP32 Hardware IP:</span>
+        <div class="ip-input-group">
+          <input type="text" class="ip-input" id="espIpInput" placeholder="e.g. 192.168.1.50 or 192.168.4.1">
+          <button class="ip-btn" onclick="saveEspIp()">CONNECT</button>
+        </div>
+      </div>
+      <div id="ipStatusPill" style="font-family:var(--font-mono); font-size:11px; font-weight:700; color:var(--text-muted); background:rgba(255,255,255,0.8); border:1px solid #cbd5e1; padding:5px 12px; border-radius:9999px;">
+        Awaiting IP Input
       </div>
     </div>
+
+    <!-- Mixed Content HTTPS Warning (Shown only if browser blocks HTTP over HTTPS) -->
+    <div id="httpsWarning" style="display:none; background:rgba(254, 242, 242, 0.95); border:1px solid #ef4444; border-radius:14px; padding:12px 18px; margin-bottom:18px; font-size:12px; color:#991b1b; line-height:1.5; box-shadow:var(--glass-shadow);">
+      <strong>⚠️ Browser Security Note:</strong> Because this dashboard is hosted on <strong>HTTPS</strong>, your browser blocks requests to local <strong>HTTP (192.168.x.x)</strong> by default.
+      <br>👉 <strong>Easy Fix in Chrome/Edge:</strong> Click the Padlock/Settings icon next to the address bar ➔ Click <strong>Site settings</strong> ➔ Set <strong>"Insecure content"</strong> to <strong>Allow</strong> ➔ Refresh!
+    </div>
+
 
     <!-- STATUS BANNER (GREEN STABLE / RED ALERT) -->
     <section id="statusBanner" class="status-banner banner-stable">
@@ -754,30 +777,30 @@
     let hasReceivedData = false;
 
     let histCab = [];
-    let histOut = [];
-
-    // Host determination
-    // If opened from ESP32 directly, host is empty (relative /data).
-    // If opened from file:// or localhost, use stored IP or ask for it.
+    // Universal Connection Engine
+    // Supports deployed web URLs (Vercel, Netlify, GitHub Pages) and Localhost
     let apiBase = '';
-    const isLocalFile = window.location.protocol === 'file:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const currentHost = window.location.hostname;
+    const isDirectEsp = /^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/.test(currentHost);
 
-    if (isLocalFile) {
-      const savedIp = localStorage.getItem('thermacore_esp_ip') || '';
-      const ipBar = document.getElementById('ipBar');
-      ipBar.style.display = 'flex';
-      if (savedIp) {
-        document.getElementById('espIpInput').value = savedIp;
-        apiBase = savedIp.startsWith('http') ? savedIp : 'http://' + savedIp;
-      }
+    // Retrieve saved IP or default
+    let savedIp = localStorage.getItem('thermacore_esp_ip') || (isDirectEsp ? window.location.origin : '');
+    if (savedIp) {
+      document.getElementById('espIpInput').value = savedIp.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+      apiBase = savedIp.startsWith('http') ? savedIp : 'http://' + savedIp;
+      document.getElementById('ipStatusPill').innerText = 'Connecting to ' + document.getElementById('espIpInput').value + '...';
+      document.getElementById('ipStatusPill').style.color = '#0284c7';
     }
 
     function saveEspIp() {
       let val = document.getElementById('espIpInput').value.trim();
       if (val) {
-        if (!val.startsWith('http')) val = 'http://' + val;
-        localStorage.setItem('thermacore_esp_ip', val);
-        apiBase = val;
+        val = val.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+        const fullUrl = 'http://' + val;
+        localStorage.setItem('thermacore_esp_ip', fullUrl);
+        apiBase = fullUrl;
+        document.getElementById('ipStatusPill').innerText = 'Connecting to ' + val + '...';
+        document.getElementById('ipStatusPill').style.color = '#0284c7';
         poll();
       }
     }
@@ -788,7 +811,7 @@
       document.getElementById('liveTime').innerText = d.toTimeString().split(' ')[0];
     }, 1000);
 
-    // Toggle Vibration
+    // Toggle Vibration Motor
     function toggleVibration() {
       fetch(apiBase + '/vibration', { method: 'POST' })
         .then(res => res.text())
@@ -855,6 +878,13 @@
 
     // Live Telemetry Polling from Physical ESP32 Sensors
     function poll() {
+      if (!apiBase && !isDirectEsp) {
+        document.getElementById('connState').innerText = 'Enter ESP32 IP';
+        document.getElementById('ipStatusPill').innerText = 'Awaiting IP Address';
+        document.getElementById('ipStatusPill').style.color = 'var(--text-muted)';
+        return;
+      }
+
       fetch(apiBase + '/data')
         .then(res => {
           if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -864,15 +894,35 @@
           hasReceivedData = true;
           document.getElementById('connState').innerText = 'Sensor Stream Live';
           document.getElementById('liveDot').className = 'live-dot active';
+          
+          const cleanHost = apiBase ? apiBase.replace(/^https?:\/\//, '') : window.location.host;
+          document.getElementById('ipStatusPill').innerText = '🟢 Connected to ' + cleanHost;
+          document.getElementById('ipStatusPill').style.color = '#065f46';
+          document.getElementById('ipStatusPill').style.background = 'rgba(209, 250, 229, 0.9)';
+          document.getElementById('ipStatusPill').style.borderColor = '#10b981';
+
+          // Hide HTTPS warning if connection is successful
+          document.getElementById('httpsWarning').style.display = 'none';
+
           updateSensorUI(d);
         })
         .catch(err => {
           if (!hasReceivedData) {
-            document.getElementById('connState').innerText = 'Awaiting Sensor Connection...';
+            document.getElementById('connState').innerText = 'Searching for ESP32...';
             document.getElementById('liveDot').className = 'live-dot';
+            document.getElementById('ipStatusPill').innerText = '🔴 Offline / Check IP';
+            document.getElementById('ipStatusPill').style.color = '#991b1b';
+            document.getElementById('ipStatusPill').style.background = 'rgba(254, 242, 242, 0.9)';
+            document.getElementById('ipStatusPill').style.borderColor = '#ef4444';
+
+            // If on HTTPS, display helpful Mixed Content instructions
+            if (window.location.protocol === 'https:') {
+              document.getElementById('httpsWarning').style.display = 'block';
+            }
           }
         });
     }
+
 
     function updateSensorUI(d) {
       // 1. Cabin Temp (DHT11)
